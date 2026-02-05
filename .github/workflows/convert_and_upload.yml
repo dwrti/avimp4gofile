@@ -6,52 +6,57 @@ on:
       video_url:
         description: 'ضع رابط الفيديو هنا'
         required: true
-        default: ''
 
 jobs:
   convert_and_upload:
     runs-on: ubuntu-latest
-    # نحدد مهلة زمنية ساعة كاملة عشان ما يفصل عليك لو الفيديو كبير
     timeout-minutes: 60 
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Tools (FFmpeg & JQ)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg jq curl
+      - name: Install Tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg jq curl
 
-      - name: Download Video (Resilient Mode)
+      - name: Download Video
         run: |
-          echo "جاري تحميل الفيديو، خلك مرتاح..."
-          # استخدمنا محاولات متكررة، إجبار HTTP/1.1، واستكمال التحميل لو انقطع
-          curl -L --http1.1 --retry 10 --retry-max-time 1200 --connect-timeout 60 \
+          curl -L --http1.1 --retry 10 --retry-max-time 1200 \
           "${{ github.event.inputs.video_url }}" \
           -o input_video_raw
 
-      - name: Convert to Safari-Ready MP4
+      - name: Convert to Safari MP4
         run: |
-          echo "بدأنا عملية التحويل لصيغة Safari (H.264)..."
-          ffmpeg -i input_video_raw -c:v libx264 -profile:v main -level:v 4.0 -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart output_video.mp4
+          ffmpeg -i input_video_raw -c:v libx264 -profile:v main -level:v 4.0 \
+          -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart output_video.mp4
 
       - name: Upload to Gofile
         id: upload
         run: |
-          echo "جاري الرفع إلى Gofile..."
-          # الحصول على أفضل سيرفر متاح
-          SERVER=$(curl -s https://api.gofile.io/getServer | jq -r '.data.server')
+          echo "جاري الرفع..."
+          # محاولة الحصول على السيرفر مع فحص الاستجابة
+          SERVER_DATA=$(curl -s https://api.gofile.io/getServer)
+          SERVER=$(echo $SERVER_DATA | jq -r '.data.server // "store1"')
           
-          # رفع الملف واستخراج رابط التحميل
+          # الرفع مع طباعة النتيجة للفحص لو قدر الله صار خطأ
           RESPONSE=$(curl -F "file=@output_video.mp4" "https://${SERVER}.gofile.io/uploadFile")
+          echo "Debug Response: $RESPONSE"
+          
           DOWNLOAD_PAGE=$(echo $RESPONSE | jq -r '.data.downloadPage')
           
+          if [ "$DOWNLOAD_PAGE" == "null" ]; then
+            echo "فشل الرفع، نحاول مرة ثانية بسيرفر احتياطي..."
+            RESPONSE=$(curl -F "file=@output_video.mp4" "https://store1.gofile.io/uploadFile")
+            DOWNLOAD_PAGE=$(echo $RESPONSE | jq -r '.data.downloadPage')
+          fi
+
           echo "FINAL_URL=$DOWNLOAD_PAGE" >> $GITHUB_ENV
-          echo "تم الرفع بنجاح: $DOWNLOAD_PAGE"
 
       - name: Final Summary
         run: |
-          echo "### 🚀 اكتملت المهمة بنجاح!" >> $GITHUB_STEP_SUMMARY
-          echo "- **رابط Gofile:** ${{ env.FINAL_URL }}" >> $GITHUB_STEP_SUMMARY
-          echo "تم التحويل لصيغة MP4 المتوافقة مع Safari." >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 النتيجة النهائية" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ env.FINAL_URL }}" != "null" ]; then
+            echo "- تم الرفع بنجاح: [اضغط هنا للتحميل](${{ env.FINAL_URL }})" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ للأسف فشل الرفع نهائياً، تأكد من أن حجم الملف لا يتجاوز الحدود المجانية لـ Gofile." >> $GITHUB_STEP_SUMMARY
+          fi
