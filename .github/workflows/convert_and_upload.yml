@@ -1,11 +1,7 @@
-name: Video Converter & Gofile Uploader
+name: Video Converter & Fast Uploader
 
 on:
-  workflow_dispatch:
-    inputs:
-      video_url:
-        description: 'ضع رابط الفيديو هنا'
-        required: true
+  workflow_dispatch: # تشغيل بنقرة زر واحدة فقط
 
 jobs:
   convert_and_upload:
@@ -17,46 +13,37 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Tools
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg jq curl
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg curl
 
       - name: Download Video
         run: |
-          curl -L --http1.1 --retry 10 --retry-max-time 1200 \
-          "${{ github.event.inputs.video_url }}" \
+          echo "جاري تحميل فيديو 'موكا موكا'..."
+          # تم تثبيت الرابط هنا بناءً على طلبك
+          curl -L --http1.1 --retry 10 --connect-timeout 60 \
+          "https://abra--5e4bd525.api.cosmic-crab.buzz/2394d7ac22d65619d4922bec0c6829d4895a3df1/%D9%85%D9%88%D9%83%D8%A7%20%D9%85%D9%88%D9%83%D8%A7%201-51%20VHS/01.avi?api-key=8acbcf1e-732c-4574-a3bf-27e6a85b86f1&download=true&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzA0MDE4ODMsInJhdGUiOiI1TSIsInJvbGUiOiJmcmVlIiwic2Vzc2lvbklEIjoiTVRjM01ETXhNell6TUh4T2QzZEJUa1ZvVVZGNlZrVlRiR3hFVjFWc1ZFNVdXazFUTVZaVVVsUldUbFpzVGxKUk1WcFJUbXBTUWxKR1VrZFNhMGt6VjJ0dmVsSXhXazFTTURWS1UwWmtTRTR3TVZaVWJFVTlmR0FPQzB5MDNkcE9jcmtrQmxHN0Y1YU9SbGxZX3JBSUpMZGhMNE5vU0drLSIsImRvbWFpbiI6IndlYnRvci5pbyIsImFnZW50IjoiTW96aWxsYS81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTBfMTVfNykgQXBwbGVXZWJLaXQvNjA1LjEuMTUgKEtIVE1MLCBsaWtlIEdlY2tvKSBWZXJzaW9uLzI2LjIgU2FmYXJpLzYwNS4xLjE1IiwicmVtb3RlQWRkcmVzcyI6IjIwMDE6MTZhNDoyNmQ6NGI2NDphYzIxOjg1MDM6YTA5Zjo3NGIzIn0.6DiZoWP24sZC6EH0yHSh5sGkBs7zx9_CRcaE27e-R4E" \
           -o input_video_raw
 
       - name: Convert to Safari MP4
         run: |
-          ffmpeg -i input_video_raw -c:v libx264 -profile:v main -level:v 4.0 \
+          echo "جاري التحويل لصيغة متوافقة مع Safari..."
+          ffmpeg -i input_video_raw -c:v libx264 -profile:v baseline -level 3.0 \
           -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart output_video.mp4
 
-      - name: Upload to Gofile
-        id: upload
+      - name: Upload to Services
         run: |
           echo "جاري الرفع..."
-          # محاولة الحصول على السيرفر مع فحص الاستجابة
-          SERVER_DATA=$(curl -s https://api.gofile.io/getServer)
-          SERVER=$(echo $SERVER_DATA | jq -r '.data.server // "store1"')
+          # الرفع إلى BashUpload كخيار سريع وأساسي
+          UPLOAD_URL=$(curl -T output_video.mp4 https://bashupload.com/output_video.mp4 | grep -o 'https://bashupload.com/[^ ]*' | head -n 1)
           
-          # الرفع مع طباعة النتيجة للفحص لو قدر الله صار خطأ
-          RESPONSE=$(curl -F "file=@output_video.mp4" "https://${SERVER}.gofile.io/uploadFile")
-          echo "Debug Response: $RESPONSE"
-          
-          DOWNLOAD_PAGE=$(echo $RESPONSE | jq -r '.data.downloadPage')
-          
-          if [ "$DOWNLOAD_PAGE" == "null" ]; then
-            echo "فشل الرفع، نحاول مرة ثانية بسيرفر احتياطي..."
-            RESPONSE=$(curl -F "file=@output_video.mp4" "https://store1.gofile.io/uploadFile")
-            DOWNLOAD_PAGE=$(echo $RESPONSE | jq -r '.data.downloadPage')
+          if [ -z "$UPLOAD_URL" ]; then
+            echo "فشل الرفع الأول، نجرب Catbox..."
+            UPLOAD_URL=$(curl -F "reqtype=fileupload" -F "fileToUpload=@output_video.mp4" https://catbox.moe/user/api.php)
           fi
 
-          echo "FINAL_URL=$DOWNLOAD_PAGE" >> $GITHUB_ENV
+          echo "FINAL_URL=$UPLOAD_URL" >> $GITHUB_ENV
 
       - name: Final Summary
         run: |
-          echo "### 🚀 النتيجة النهائية" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ env.FINAL_URL }}" != "null" ]; then
-            echo "- تم الرفع بنجاح: [اضغط هنا للتحميل](${{ env.FINAL_URL }})" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ للأسف فشل الرفع نهائياً، تأكد من أن حجم الملف لا يتجاوز الحدود المجانية لـ Gofile." >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "### ✅ انتهت المهمة لعيونك" >> $GITHUB_STEP_SUMMARY
+          echo "الرابط جاهز للتحميل والتشغيل على Safari:" >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.FINAL_URL }}" >> $GITHUB_STEP_SUMMARY
