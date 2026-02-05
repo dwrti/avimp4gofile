@@ -1,39 +1,57 @@
-name: Video Converter & Uploader
+name: Video Converter & Gofile Uploader
 
 on:
-  workflow_dispatch: # تشغيل يدوي
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'ضع رابط الفيديو هنا'
+        required: true
+        default: ''
 
 jobs:
-  convert_video:
+  convert_and_upload:
     runs-on: ubuntu-latest
+    # نحدد مهلة زمنية ساعة كاملة عشان ما يفصل عليك لو الفيديو كبير
+    timeout-minutes: 60 
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install FFmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Download Video
+      - name: Install Tools (FFmpeg & JQ)
         run: |
-          curl -L "https://abra--5e4bd525.api.cosmic-crab.buzz/2394d7ac22d65619d4922bec0c6829d4895a3df1/%D9%85%D9%88%D9%83%D8%A7%20%D9%85%D9%88%D9%83%D8%A7%201-51%20VHS/01.avi?api-key=8acbcf1e-732c-4574-a3bf-27e6a85b86f1&download=true&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzA0MDAwNTUsInJhdGUiOiI1TSIsInJvbGUiOiJmcmVlIiwic2Vzc2lvbklEIjoiTVRjM01ETXhNell6TUh4T2QzZEJUa1ZvVVZGNlZrVlRiR3hFVjFWc1ZFNVdXazFUTVZaVVVsUldUbFpzVGxKUk1WcFJUbXBTUWxKR1VrZFNhMGt6VjJ0dmVsSXhXazFTTURWS1UwWmtTRTR3TVZaVWJFVTlmR0FPQzB5MDNkcE9jcmtrQmxHN0Y1YU9SbGxZX3JBSUpMZGhMNE5vU0drLSIsImRvbWFpbiI6IndlYnRvci5pbyIsImFnZW50IjoiTW96aWxsYS81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTBfMTVfNykgQXBwbGVXZWJLaXQvNjA1LjEuMTUgKEtIVE1MLCBsaWtlIEdlY2tvKSBWZXJzaW9uLzI2LjIgU2FmYXJpLzYwNS4xLjE1IiwicmVtb3RlQWRkcmVzcyI6IjIwMDE6MTZhNDoyNmQ6NGI2NDphYzIxOjg1MDM6YTA5Zjo3NGIzIn0.8fBR0nBcrfsqoCc8F-Rjko5VANgi_SMzY1vpFMYzAbM" -o input_video.avi
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg jq curl
 
-      - name: Convert to Safari-Compatible MP4
+      - name: Download Video (Resilient Mode)
         run: |
-          # نستخدم H.264 و AAC لضمان التشغيل على Safari
-          ffmpeg -i input_video.avi -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 128k output_video.mp4
+          echo "جاري تحميل الفيديو، خلك مرتاح..."
+          # استخدمنا محاولات متكررة، إجبار HTTP/1.1، واستكمال التحميل لو انقطع
+          curl -L --http1.1 --retry 10 --retry-max-time 1200 --connect-timeout 60 \
+          "${{ github.event.inputs.video_url }}" \
+          -o input_video_raw
+
+      - name: Convert to Safari-Ready MP4
+        run: |
+          echo "بدأنا عملية التحويل لصيغة Safari (H.264)..."
+          ffmpeg -i input_video_raw -c:v libx264 -profile:v main -level:v 4.0 -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart output_video.mp4
 
       - name: Upload to Gofile
+        id: upload
         run: |
-          # الحصول على أفضل سيرفر متاح حالياً
+          echo "جاري الرفع إلى Gofile..."
+          # الحصول على أفضل سيرفر متاح
           SERVER=$(curl -s https://api.gofile.io/getServer | jq -r '.data.server')
-          echo "Uploading to server: $SERVER"
           
-          # رفع الملف
+          # رفع الملف واستخراج رابط التحميل
           RESPONSE=$(curl -F "file=@output_video.mp4" "https://${SERVER}.gofile.io/uploadFile")
-          echo "Upload Response: $RESPONSE"
-          
-          # استخراج رابط التحميل
           DOWNLOAD_PAGE=$(echo $RESPONSE | jq -r '.data.downloadPage')
-          echo "### ✅ تم التحويل والرفع بنجاح!" >> $GITHUB_STEP_SUMMARY
-          echo "رابط الملف على Gofile: $DOWNLOAD_PAGE" >> $GITHUB_STEP_SUMMARY
+          
+          echo "FINAL_URL=$DOWNLOAD_PAGE" >> $GITHUB_ENV
+          echo "تم الرفع بنجاح: $DOWNLOAD_PAGE"
+
+      - name: Final Summary
+        run: |
+          echo "### 🚀 اكتملت المهمة بنجاح!" >> $GITHUB_STEP_SUMMARY
+          echo "- **رابط Gofile:** ${{ env.FINAL_URL }}" >> $GITHUB_STEP_SUMMARY
+          echo "تم التحويل لصيغة MP4 المتوافقة مع Safari." >> $GITHUB_STEP_SUMMARY
